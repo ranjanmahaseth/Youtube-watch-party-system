@@ -94,39 +94,103 @@ export default function YouTubePlayer({ ref, lockControls, onReady, onStateChang
     };
   }, []);
 
+  const containerRef = useRef(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    const target = containerRef.current;
+    if (!target) return;
+
+    if (!document.fullscreenElement) {
+      if (target.requestFullscreen) {
+        target.requestFullscreen().catch(() => {});
+      } else if (target.webkitRequestFullscreen) {
+        target.webkitRequestFullscreen();
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+      }
+    }
+  };
+
   useImperativeHandle(
     ref,
     () => ({
       play: () => playerRef.current?.playVideo?.(),
       pause: () => playerRef.current?.pauseVideo?.(),
       seekTo: (seconds, allowSeekAhead = true) => playerRef.current?.seekTo?.(seconds, allowSeekAhead),
-      // cueVideoById loads without playing, so the caller decides playback.
-      // `startSeconds` avoids the classic bug where a seek issued straight after
-      // a load is lost, because the video has not been cued yet.
-      loadVideo: (id, startSeconds = 0) => {
+      // If autoPlay is requested, loadVideoById starts playback immediately.
+      // cueVideoById loads without playing.
+      loadVideo: (id, startSeconds = 0, autoPlay = false) => {
         setVideoError('');
-        playerRef.current?.cueVideoById?.({ videoId: id, startSeconds });
+        if (autoPlay) {
+          playerRef.current?.loadVideoById?.({ videoId: id, startSeconds });
+        } else {
+          playerRef.current?.cueVideoById?.({ videoId: id, startSeconds });
+        }
       },
       getCurrentTime: () => playerRef.current?.getCurrentTime?.() ?? 0,
       getPlayerState: () => playerRef.current?.getPlayerState?.() ?? PLAYER_STATE.UNSTARTED,
       getPlayer: () => playerRef.current,
+      toggleFullscreen,
+      isFullscreen,
     }),
-    [],
+    [isFullscreen],
   );
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-slate-800 bg-black">
+      <div
+        ref={containerRef}
+        className={`relative aspect-video w-full overflow-hidden rounded-xl border border-slate-800 bg-black ${
+          isFullscreen ? 'h-screen w-screen rounded-none border-none' : ''
+        }`}
+      >
         <div ref={wrapperRef} className="h-full w-full" />
 
         {lockControls && (
-          // Covers the iframe so the embed's own controls cannot be reached.
-          // This is only a UX guard: the server refuses playback from
-          // participants no matter what the client sends.
+          // Covers the iframe so participants cannot pause or scrub,
+          // but double-clicking toggles fullscreen.
           <div
-            className="absolute inset-0 z-10 cursor-not-allowed"
-            title="Only the host or a moderator can control playback"
+            className="absolute inset-0 z-10 cursor-default"
+            onDoubleClick={toggleFullscreen}
+            title="Double-click to toggle fullscreen (Host/Moderator controls playback)"
           />
+        )}
+
+        {/* Fullscreen Button - accessible to Hosts, Moderators, and Participants alike */}
+        {status === 'ready' && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleFullscreen();
+            }}
+            className="absolute bottom-3 right-3 z-20 flex items-center gap-1.5 rounded-lg border border-slate-700/80 bg-slate-950/80 px-2.5 py-1.5 text-xs font-medium text-slate-200 shadow-xl backdrop-blur-md transition hover:border-slate-500 hover:bg-slate-900 hover:text-white hover:scale-105 active:scale-95"
+            title={isFullscreen ? 'Exit Fullscreen (Esc)' : 'Full Screen'}
+          >
+            {isFullscreen ? (
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9L4 4m0 0v4m0-4h4m6 6l5 5m0 0v-4m0 4h-4" />
+              </svg>
+            ) : (
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m4 0v4m0-4l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              </svg>
+            )}
+            <span className="hidden sm:inline">{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
+          </button>
         )}
 
         {status !== 'ready' && (

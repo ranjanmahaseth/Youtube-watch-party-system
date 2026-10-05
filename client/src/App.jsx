@@ -278,7 +278,7 @@ export default function App() {
   }, []);
 
   /** Opens the socket if needed, then asks the server for a seat in the room. */
-  function joinRoom(roomId, name, hostToken) {
+  function joinRoom(roomId, name, hostToken, isCreation = false) {
     if (!socket.connected) {
       setConnection('connecting');
       socket.connect();
@@ -345,6 +345,18 @@ export default function App() {
         if (window.location.search !== targetSearch) {
           window.history.pushState({ inRoom: true, roomId }, '', targetSearch);
         }
+
+        // When a host creates a new room, start a default starter video and play automatically
+        if (isCreation && !state.video?.videoId) {
+          const DEFAULT_STARTER_VIDEO = 'jfKfPZa4VQg'; // Lofi Girl Chill Beats
+          setTimeout(() => {
+            socket.emit('change_video', { videoId: DEFAULT_STARTER_VIDEO }, (res) => {
+              if (res?.ok) {
+                socket.emit('play', { time: 0 });
+              }
+            });
+          }, 350);
+        }
       },
     );
   }
@@ -367,7 +379,7 @@ export default function App() {
     try {
       const { roomId, hostToken } = await createRoom();
       rememberHostToken(roomId, hostToken);
-      joinRoom(roomId, name, hostToken);
+      joinRoom(roomId, name, hostToken, true);
     } catch {
       setPending('');
       setError(SERVER_UNREACHABLE);
@@ -454,8 +466,9 @@ export default function App() {
   /**
    * Asks the server to change the room's video. The server decides whether this
    * user is allowed to, and re-broadcasts the room state to everyone.
+   * Automatically starts playback so the party doesn't have to manually press play.
    */
-  function changeVideo(videoId) {
+  function changeVideo(videoId, autoPlay = true) {
     setVideoError('');
 
     socket.timeout(JOIN_TIMEOUT_MS).emit('change_video', { videoId }, (timeoutError, response) => {
@@ -466,6 +479,13 @@ export default function App() {
 
       if (!response?.ok) {
         setVideoError(VIDEO_ERRORS[response?.error] ?? 'Could not change the video.');
+        return;
+      }
+
+      if (autoPlay) {
+        setTimeout(() => {
+          socket.emit('play', { time: 0 });
+        }, 350);
       }
     });
   }

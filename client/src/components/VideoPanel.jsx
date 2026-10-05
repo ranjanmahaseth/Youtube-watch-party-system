@@ -229,16 +229,20 @@ export default function VideoPanel({
 
     if (videoChanged) {
       loadedVideoIdRef.current = videoId;
-      player.loadVideo(videoId, sync?.currentTime ?? 0);
+      const shouldAutoPlay = sync ? sync.playState === 'playing' : true;
+      player.loadVideo(videoId, sync?.currentTime ?? 0, shouldAutoPlay);
     } else if (sync && sync.currentTime > 0) {
       player.seekTo(sync.currentTime, true);
     }
 
-    if (!sync) return; // a video change on its own leaves the room paused at 0
+    if (!sync) return;
 
     appliedSyncRef.current = sync.nonce;
-    if (sync.playState === 'playing') player.play();
-    else player.pause();
+    if (sync.playState === 'playing') {
+      player.play();
+    } else {
+      player.pause();
+    }
   }, [videoId, syncTarget, ready]);
 
   /**
@@ -419,19 +423,34 @@ export default function VideoPanel({
     <section className={PANEL}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className={HEADING}>Watch together</h2>
-        <span className="text-xs text-slate-400">
-          {video?.loadedBy ? `loaded by ${video.loadedBy}` : 'no video yet'}
-          {videoId && (
-            <a
-              href={buildWatchUrl(videoId)}
-              target="_blank"
-              rel="noreferrer"
-              className="ml-2 underline hover:text-slate-200"
+        <div className="flex items-center gap-2">
+          {ready && (
+            <button
+              type="button"
+              onClick={() => playerRef.current?.toggleFullscreen?.()}
+              className="flex items-center gap-1.5 rounded-md bg-slate-800/80 px-2.5 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-700 hover:text-white"
+              title="Toggle Fullscreen"
             >
-              open on YouTube
-            </a>
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m4 0v4m0-4l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              </svg>
+              <span>Fullscreen</span>
+            </button>
           )}
-        </span>
+          <span className="text-xs text-slate-400">
+            {video?.loadedBy ? `loaded by ${video.loadedBy}` : 'no video yet'}
+            {videoId && (
+              <a
+                href={buildWatchUrl(videoId)}
+                target="_blank"
+                rel="noreferrer"
+                className="ml-2 underline hover:text-slate-200"
+              >
+                open on YouTube
+              </a>
+            )}
+          </span>
+        </div>
       </div>
 
       <YouTubePlayer
