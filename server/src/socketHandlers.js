@@ -18,6 +18,7 @@ import {
   setRoomTime,
   setRoomVideo,
   toRoomState,
+  toRoomParticipants,
   upsertParticipant,
   addChatMessage,
 } from './roomStore.js';
@@ -258,6 +259,7 @@ function handleRemoveParticipant(socket, io, payload, acknowledge) {
   io.to(room.id).emit('participant_removed', {
     userId: target.userId,
     username: target.username,
+    participants: toRoomParticipants(room),
     by: host.username,
     at: Date.now(),
   });
@@ -333,6 +335,7 @@ function handleAssignRole(socket, io, payload, acknowledge) {
     userId: target.userId,
     username: target.username,
     role,
+    participants: toRoomParticipants(room),
     by: host.username,
     at: Date.now(),
   });
@@ -394,6 +397,7 @@ function detachFromRoom(io, socket) {
   io.to(room.id).emit('user_left', {
     userId: removed.userId,
     username: removed.username,
+    participants: toRoomParticipants(room),
   });
   io.to(room.id).emit('sync_state', toRoomState(room));
 }
@@ -468,6 +472,7 @@ export function registerSocketHandlers(io) {
           userId: participant.userId,
           username: participant.username,
           role: participant.role,
+          participants: toRoomParticipants(room),
         });
       }
 

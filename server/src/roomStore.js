@@ -330,23 +330,36 @@ export function resetRoomPlayback(room) {
   return room.playback;
 }
 
+export function toRoomParticipants(room) {
+  return [...room.participants.values()]
+    .sort((a, b) => a.joinedAt.localeCompare(b.joinedAt))
+    .map(({ userId, username, role }) => ({ userId, username, role }));
+}
+
 /**
  * The public snapshot of a room that clients receive.
  * Never exposes hostToken or socket ids.
  */
 export function toRoomState(room, now = Date.now()) {
+  const currentTime = Math.round(currentPlaybackTime(room, now) * 1000) / 1000;
+  const playState = room.playback.playState;
+  const videoId = room.video.videoId;
+
   return {
     roomId: room.id,
-    video: { videoId: room.video.videoId, loadedBy: room.video.loadedBy },
+    video: { videoId, loadedBy: room.video.loadedBy },
     // The room state a joiner needs: videoId (above), playState and currentTime.
     // currentTime is projected, so a joiner is told 3:42 and not a stale 3:40.
     playback: {
-      playState: room.playback.playState,
-      currentTime: Math.round(currentPlaybackTime(room, now) * 1000) / 1000,
+      playState,
+      currentTime,
     },
-    participants: [...room.participants.values()]
-      .sort((a, b) => a.joinedAt.localeCompare(b.joinedAt))
-      .map(({ userId, username, role }) => ({ userId, username, role })),
+    // Top-level aliases for direct access
+    playState,
+    currentTime,
+    videoId,
+    participants: toRoomParticipants(room),
     messages: room.messages ? [...room.messages] : [],
   };
 }
+
