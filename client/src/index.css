@@ -1,0 +1,14 @@
+@import 'tailwindcss';
+
+/*
+ * Only theme-level defaults live here. Tailwind's Preflight already resets
+ * margins, box-sizing and inherited typography, so every component is styled
+ * with utility classes in the JSX itself.
+ */
+@layer base {
+  body {
+    @apply min-h-screen bg-slate-950 text-slate-100 antialiased;
+    color-scheme: dark;
+  }
+}
+

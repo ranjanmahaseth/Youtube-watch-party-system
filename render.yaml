@@ -1,0 +1,39 @@
+# Render Blueprint Specification
+# See: https://render.com/docs/blueprint-spec
+
+services:
+  # -------------------------------------------------------------
+  # 1. Backend Web Service (Node.js + Express + Socket.IO)
+  # -------------------------------------------------------------
+  - type: web
+    name: youtube-watch-party-backend
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CLIENT_ORIGIN
+        sync: false # Set this to your frontend URL once generated (e.g. https://youtube-watch-party-frontend.onrender.com)
+      - key: YOUTUBE_API_KEY
+        sync: false # Optional: Add your YouTube Data API v3 key if you have one
+
+  # -------------------------------------------------------------
+  # 2. Frontend Static Site (React + Vite)
+  # -------------------------------------------------------------
+  - type: static
+    name: youtube-watch-party-frontend
+    plan: free
+    rootDir: client
+    buildCommand: npm ci --include=dev && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_SERVER_URL
+        sync: false # Set this to your backend URL (e.g. https://youtube-watch-party-backend.onrender.com)

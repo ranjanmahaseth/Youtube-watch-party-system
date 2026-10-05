@@ -1,0 +1,22 @@
+{
+  "name": "youtube-watch-party-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend for the YouTube Watch Party system (Express + Socket.IO).",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "test:smoke": "node test/smoke.mjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.5",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.4"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.4"
+  }
+}
