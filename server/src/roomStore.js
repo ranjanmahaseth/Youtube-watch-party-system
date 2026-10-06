@@ -1,11 +1,8 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { loadRoomFromDb, markRoomClosedInDb, saveRoomToDb } from './db.js';
 
 /**
- * In-memory room store - the single source of truth for the MVP.
- *
- * Rooms live only inside this Node process. That is enough for a watch party:
- * one server owns the state and every client syncs from it. A database is
- * deliberately not used yet (see README).
+ * Room store: in-memory fast cache + MongoDB persistence.
  *
  * roomId -> room
  */
@@ -80,6 +77,7 @@ export function createRoom() {
   };
 
   rooms.set(id, room);
+  saveRoomToDb(room);
   return room;
 }
 
@@ -105,6 +103,7 @@ export function addChatMessage(room, { userId, username, role, text }) {
     room.messages.splice(0, room.messages.length - MAX_CHAT_MESSAGES);
   }
 
+  saveRoomToDb(room);
   return message;
 }
 
@@ -113,11 +112,30 @@ export function getRoom(roomId) {
   return id ? rooms.get(id) ?? null : null;
 }
 
+/**
+ * Finds room in-memory, or loads persistent snapshot from MongoDB if needed.
+ */
+export async function getRoomOrLoad(roomId) {
+  const id = normalizeRoomId(roomId);
+  if (!id) return null;
+
+  const inMemory = rooms.get(id);
+  if (inMemory) return inMemory;
+
+  const fromDb = await loadRoomFromDb(id);
+  if (fromDb) {
+    rooms.set(id, fromDb);
+    return fromDb;
+  }
+  return null;
+}
+
 export function scheduleRoomCleanup(room) {
   if (room.emptyTimer) return;
 
   room.emptyTimer = setTimeout(() => {
     rooms.delete(room.id);
+    markRoomClosedInDb(room.id);
     console.log(`[room] ${room.id} closed (empty)`);
   }, emptyRoomTtlMs());
 
@@ -280,13 +298,54 @@ export function setParticipantRole(room, userId, role) {
   if (!participant) return null;
 
   participant.role = role;
+  saveRoomToDb(room);
   return participant;
+}
+
+/**
+ * Transfers host ownership to another seated participant.
+ * The previous host becomes a moderator.
+ * A new hostToken is issued so only the new host holds the key.
+ */
+export function transferHost(room, newHostUserId) {
+  const newHost = room.participants.get(newHostUserId);
+  if (!newHost) return null;
+
+  // Find the previous host
+  let previousHost = null;
+  for (const participant of room.participants.values()) {
+    if (participant.role === ROLES.HOST) {
+      previousHost = participant;
+      break;
+    }
+  }
+
+  // Issue brand new secret host token
+  const newHostToken = randomUUID();
+  room.hostToken = newHostToken;
+
+  // Demote old host to moderator
+  if (previousHost) {
+    previousHost.role = ROLES.MODERATOR;
+  }
+
+  // Promote target to host
+  newHost.role = ROLES.HOST;
+
+  saveRoomToDb(room);
+
+  return {
+    previousHost: previousHost ? { userId: previousHost.userId, username: previousHost.username } : null,
+    newHost: { userId: newHost.userId, username: newHost.username },
+    newHostToken,
+  };
 }
 
 export function setRoomVideo(room, { videoId, loadedBy }) {
   room.video = { videoId, loadedBy };
   // A different video starts from the top, paused. Everyone is on equal footing.
   resetRoomPlayback(room);
+  saveRoomToDb(room);
   return room.video;
 }
 
@@ -316,12 +375,14 @@ export function setRoomPlayState(room, playState, atTime) {
   const currentTime = Number.isFinite(atTime) ? atTime : currentPlaybackTime(room);
 
   room.playback = { playState, currentTime, updatedAt: Date.now() };
+  saveRoomToDb(room);
   return room.playback;
 }
 
 /** Moves the position without changing play/pause. */
 export function setRoomTime(room, currentTime) {
   room.playback = { ...room.playback, currentTime, updatedAt: Date.now() };
+  saveRoomToDb(room);
   return room.playback;
 }
 

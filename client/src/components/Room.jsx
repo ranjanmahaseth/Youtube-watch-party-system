@@ -66,6 +66,8 @@ export default function Room({
   canGoBackVideo = false,
   onPreviousVideo,
   videoHistoryCount = 1,
+  onTransferHost,
+  transferringUserId = '',
 }) {
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState('chat');
@@ -392,6 +394,24 @@ export default function Room({
                                     Demote
                                   </button>
                                 )}
+
+                                <button
+                                  type="button"
+                                  className="rounded border border-amber-600/40 bg-amber-950/40 px-2 py-1 text-xs font-semibold text-amber-300 transition hover:bg-amber-900/60 hover:text-white"
+                                  title="Transfer Host role to this participant"
+                                  disabled={rowBusy || transferringUserId === participant.userId}
+                                  onClick={() => {
+                                    if (
+                                      window.confirm(
+                                        `Transfer Host role to "${participant.username}"? You will become a moderator.`,
+                                      )
+                                    ) {
+                                      onTransferHost?.(participant.userId);
+                                    }
+                                  }}
+                                >
+                                  {transferringUserId === participant.userId ? 'Transferring...' : '👑 Make Host'}
+                                </button>
 
                                 <button
                                   type="button"

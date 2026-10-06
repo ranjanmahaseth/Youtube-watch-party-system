@@ -26,3 +26,41 @@ export async function searchYouTube(query) {
   return data.results || [];
 }
 
+/** Registers a new account. */
+export async function registerUser(username, password, email = '') {
+  const response = await fetch(`${SERVER_URL}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password, email }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || `Registration failed (${response.status})`);
+  }
+  return data;
+}
+
+/** Logs in with username and password. */
+export async function loginUser(username, password) {
+  const response = await fetch(`${SERVER_URL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || `Login failed (${response.status})`);
+  }
+  return data;
+}
+
+/** Fetches currently logged-in user with JWT token. */
+export async function fetchCurrentUser(token) {
+  if (!token) return null;
+  const response = await fetch(`${SERVER_URL}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) return null;
+  const data = await response.json().catch(() => ({}));
+  return data.user || null;
+}

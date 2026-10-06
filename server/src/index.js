@@ -3,10 +3,12 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'node:http';
 import { Server } from 'socket.io';
-import { createRoom, getRoom } from './roomStore.js';
+import { createRoom, getRoom, getRoomOrLoad } from './roomStore.js';
 import { registerSocketHandlers } from './socketHandlers.js';
 import { searchYouTube } from './youtubeSearch.js';
 import { setupRedis, isRedisActive, closeRedis } from './redis.js';
+import { setupDatabase, isDbActive } from './db.js';
+import { authRouter } from './auth.js';
 
 dotenv.config({ quiet: true });
 
@@ -45,11 +47,15 @@ app.set('trust proxy', 1);
 app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(express.json());
 
+// Authentication routes (Register, Login, Me)
+app.use('/api/auth', authRouter);
+
 app.get('/', (req, res) => {
   res.json({
     status: 'ok',
     message: 'YouTube Watch Party API is running',
     redis: isRedisActive() ? 'connected' : 'disabled (in-memory mode)',
+    database: isDbActive() ? 'connected (MongoDB)' : 'in-memory mode',
   });
 });
 
@@ -58,6 +64,7 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     uptime: process.uptime(),
     redis: isRedisActive() ? 'connected' : 'disabled (in-memory mode)',
+    database: isDbActive() ? 'connected (MongoDB)' : 'in-memory mode',
   });
 });
 
@@ -69,14 +76,17 @@ app.post('/api/rooms', (req, res) => {
 });
 
 // Lets the join screen verify a code before opening a socket.
-app.get('/api/rooms/:roomId', (req, res) => {
-  const room = getRoom(req.params.roomId);
+app.get('/api/rooms/:roomId', async (req, res) => {
+  let room = getRoom(req.params.roomId);
+  if (!room) {
+    room = await getRoomOrLoad(req.params.roomId);
+  }
   if (!room) return res.status(404).json({ exists: false });
 
   return res.json({
     exists: true,
     roomId: room.id,
-    participantCount: room.participants.size,
+    participantCount: room.participants ? room.participants.size : 0,
   });
 });
 
@@ -108,6 +118,9 @@ registerSocketHandlers(io);
 
 // Initialize Redis adapter if REDIS_URL is provided, with graceful in-memory fallback
 setupRedis(io);
+
+// Initialize MongoDB if MONGODB_URI is provided, with graceful in-memory fallback
+setupDatabase();
 
 httpServer.listen(PORT, () => {
   console.log(`\n🚀 [server] Backend API running at: http://localhost:${PORT}`);

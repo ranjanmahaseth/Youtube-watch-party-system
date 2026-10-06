@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { socket } from './socket.js';
-import { createRoom, roomExists } from './api.js';
+import { createRoom, fetchCurrentUser, loginUser, registerUser, roomExists } from './api.js';
 import {
+  clearAuthToken,
+  clearAuthUser,
+  getAuthToken,
+  getAuthUser,
   getHostToken,
   getOrCreateUserId,
   getRememberedUsername,
@@ -9,6 +13,8 @@ import {
   rememberHostToken,
   rememberSeatToken,
   rememberUsername,
+  setAuthToken,
+  setAuthUser,
 } from './lib/session.js';
 import Home from './components/Home.jsx';
 import Room from './components/Room.jsx';
@@ -78,6 +84,11 @@ export default function App() {
   const [memberError, setMemberError] = useState('');
   const [removingUserId, setRemovingUserId] = useState('');
   const [assigningUserId, setAssigningUserId] = useState('');
+  const [transferringUserId, setTransferringUserId] = useState('');
+  // User Authentication state
+  const [currentUser, setCurrentUser] = useState(() => getAuthUser());
+  const [authPending, setAuthPending] = useState('');
+  const [authError, setAuthError] = useState('');
   // The last command the server told us about - play, pause or seek. The nonce
   // makes sure two identical commands in a row are both delivered to the player.
   const [remoteCommand, setRemoteCommand] = useState(null);
@@ -85,10 +96,33 @@ export default function App() {
   // roomState on purpose: roomState changes constantly as people come and go,
   // but a join snapshot must be applied exactly once.
   const [syncTarget, setSyncTarget] = useState(null);
-  const [username, setUsername] = useState(getRememberedUsername());
+  const [username, setUsername] = useState(() => getAuthUser()?.username || getRememberedUsername());
   const [videoHistory, setVideoHistory] = useState([]);
   const videoHistoryRef = useRef([]);
   const roomStateRef = useRef(null);
+
+  // Check auth session on startup
+  useEffect(() => {
+    const token = getAuthToken();
+    if (token) {
+      fetchCurrentUser(token)
+        .then((user) => {
+          if (user) {
+            setCurrentUser(user);
+            setAuthUser(user);
+            setUsername(user.username);
+            rememberUsername(user.username);
+          } else {
+            clearAuthToken();
+            clearAuthUser();
+            setCurrentUser(null);
+          }
+        })
+        .catch(() => {
+          // If server is temporarily unreachable, keep stored local user
+        });
+    }
+  }, []);
 
   // The seat we currently hold. A ref lets the socket listeners read the latest
   // value without having to re-register themselves on every change.
@@ -323,6 +357,28 @@ export default function App() {
       handleLeave(true);
     };
 
+    const handleHostTokenGranted = (payload) => {
+      if (payload?.roomId && payload?.hostToken) {
+        rememberHostToken(payload.roomId, payload.hostToken);
+        if (sessionRef.current) {
+          sessionRef.current.hostToken = payload.hostToken;
+        }
+        logActivity('👑 You are now the Host of this room!');
+      }
+    };
+
+    const handleHostTransferred = (payload) => {
+      const { previousHost, newHost } = payload || {};
+      logActivity(
+        `${previousHost?.username ?? 'The host'} transferred the Host role to ${newHost?.username ?? 'another user'}`,
+      );
+      if (previousHost?.userId === MY_USER_ID) {
+        if (sessionRef.current) {
+          sessionRef.current.hostToken = '';
+        }
+      }
+    };
+
     socket.on('sync_state', handleSyncState);
     socket.on('user_joined', handleUserJoined);
     socket.on('user_left', handleUserLeft);
@@ -336,6 +392,8 @@ export default function App() {
     socket.on('change_video', handleVideoChanged);
     socket.on('participant_removed', handleParticipantRemoved);
     socket.on('role_assigned', handleRoleAssigned);
+    socket.on('host_token_granted', handleHostTokenGranted);
+    socket.on('host_transferred', handleHostTransferred);
     socket.on('permission_denied', handlePermissionDenied);
     window.addEventListener('popstate', handlePopState);
 
@@ -354,6 +412,8 @@ export default function App() {
       socket.off('change_video', handleVideoChanged);
       socket.off('participant_removed', handleParticipantRemoved);
       socket.off('role_assigned', handleRoleAssigned);
+      socket.off('host_token_granted', handleHostTokenGranted);
+      socket.off('host_transferred', handleHostTransferred);
       socket.off('permission_denied', handlePermissionDenied);
     };
   }, []);
@@ -465,7 +525,11 @@ export default function App() {
   }
 
   async function handleCreate() {
-    const name = username.trim();
+    if (!currentUser) {
+      setError('Please sign in or create an account before creating a room.');
+      return;
+    }
+    const name = currentUser.username.trim() || username.trim();
     if (!name) {
       setError('Please enter a username first.');
       return;
@@ -485,7 +549,11 @@ export default function App() {
   }
 
   async function handleJoin(rawRoomId) {
-    const name = username.trim();
+    if (!currentUser) {
+      setError('Please sign in or create an account before joining a room.');
+      return;
+    }
+    const name = currentUser.username.trim() || username.trim();
     const code = rawRoomId.trim().toUpperCase();
 
     if (!name) {
@@ -639,6 +707,81 @@ export default function App() {
     );
   }
 
+  /**
+   * Transfers room host ownership to another participant.
+   */
+  function handleTransferHost(userId) {
+    setMemberError('');
+    setTransferringUserId(userId);
+
+    socket.timeout(JOIN_TIMEOUT_MS).emit(
+      'transfer_host',
+      { userId },
+      (timeoutError, response) => {
+        setTransferringUserId('');
+
+        if (timeoutError) {
+          setMemberError(SERVER_UNREACHABLE);
+          return;
+        }
+
+        if (!response?.ok) {
+          setMemberError(
+            response?.error === 'ALREADY_HOST'
+              ? 'That user is already the host.'
+              : 'Could not transfer host role.',
+          );
+        }
+      },
+    );
+  }
+
+  async function handleLogin(name, pass) {
+    setAuthError('');
+    setAuthPending('login');
+    try {
+      const data = await loginUser(name, pass);
+      setAuthToken(data.token);
+      setAuthUser(data.user);
+      setCurrentUser(data.user);
+      setUsername(data.user.username);
+      rememberUsername(data.user.username);
+      setAuthPending('');
+      return data.user;
+    } catch (err) {
+      setAuthPending('');
+      setAuthError(err.message || 'Login failed.');
+      throw err;
+    }
+  }
+
+  async function handleRegister(name, pass, email) {
+    setAuthError('');
+    setAuthPending('register');
+    try {
+      const data = await registerUser(name, pass, email);
+      setAuthToken(data.token);
+      setAuthUser(data.user);
+      setCurrentUser(data.user);
+      setUsername(data.user.username);
+      rememberUsername(data.user.username);
+      setAuthPending('');
+      return data.user;
+    } catch (err) {
+      setAuthPending('');
+      setAuthError(err.message || 'Registration failed.');
+      throw err;
+    }
+  }
+
+  function handleLogout() {
+    clearAuthToken();
+    clearAuthUser();
+    setCurrentUser(null);
+    setUsername('');
+    setAuthError('');
+  }
+
   function handlePreviousVideo() {
     if (videoHistoryRef.current.length > 1) {
       window.history.back();
@@ -674,6 +817,7 @@ export default function App() {
     setMemberError('');
     setRemovingUserId('');
     setAssigningUserId('');
+    setTransferringUserId('');
     setRemoteCommand(null);
     setSyncTarget(null);
 
@@ -731,6 +875,8 @@ export default function App() {
         canGoBackVideo={videoHistory.length > 1}
         onPreviousVideo={handlePreviousVideo}
         videoHistoryCount={videoHistory.length}
+        onTransferHost={handleTransferHost}
+        transferringUserId={transferringUserId}
       />
     );
   }
@@ -739,9 +885,15 @@ export default function App() {
     <Home
       initialRoomId={INVITE_ROOM_ID}
       username={username}
+      currentUser={currentUser}
       pending={pending}
       error={error}
       connectionError={connectionError}
+      authError={authError}
+      authPending={authPending}
+      onLogin={handleLogin}
+      onRegister={handleRegister}
+      onLogout={handleLogout}
       onUsernameChange={handleUsernameChange}
       onCreate={handleCreate}
       onJoin={handleJoin}

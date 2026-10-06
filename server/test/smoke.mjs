@@ -818,6 +818,113 @@ async function main() {
       directSearchData.results?.length > 0 && directSearchData.results[0].id === SAMPLE_VIDEO_ID,
       JSON.stringify(directSearchData),
     );
+
+    console.log('\n22. Transfer Host – Host hands the room ownership to another participant');
+    const xferRoomRes = await fetch(`${BASE_URL}/api/rooms`, { method: 'POST' });
+    const xferRoom = await xferRoomRes.json();
+    const xferHost = await connectClient();
+    sockets.push(xferHost);
+    const xferGuest = await connectClient();
+    sockets.push(xferGuest);
+
+    await join(xferHost, {
+      roomId: xferRoom.roomId,
+      username: 'OriginalHost',
+      userId: 'u-xfer-host',
+      hostToken: xferRoom.hostToken,
+    });
+
+    await join(xferGuest, {
+      roomId: xferRoom.roomId,
+      username: 'CandidateGuest',
+      userId: 'u-xfer-guest',
+    });
+
+    const guestTransferAttempt = await emitAck(xferGuest, 'transfer_host', {
+      userId: 'u-xfer-host',
+    });
+    check(
+      'a participant cannot transfer host',
+      guestTransferAttempt.ok === false && guestTransferAttempt.error === 'FORBIDDEN',
+      guestTransferAttempt.error,
+    );
+
+    const selfTransferAttempt = await emitAck(xferHost, 'transfer_host', {
+      userId: 'u-xfer-host',
+    });
+    check(
+      'host cannot transfer host to themselves',
+      selfTransferAttempt.ok === false && selfTransferAttempt.error === 'ALREADY_HOST',
+      selfTransferAttempt.error,
+    );
+
+    const guestReceivedHostToken = nextEvent(xferGuest, 'host_token_granted');
+    const roomHeardHostTransfer = nextEvent(xferHost, 'host_transferred');
+
+    const validTransferAck = await emitAck(xferHost, 'transfer_host', {
+      userId: 'u-xfer-guest',
+    });
+    check('host can transfer host role to another participant', validTransferAck.ok === true, validTransferAck.error);
+
+    const hostTokenPayload = await guestReceivedHostToken;
+    check(
+      'new host receives new secret hostToken',
+      typeof hostTokenPayload.hostToken === 'string' && hostTokenPayload.hostToken.length > 0,
+      JSON.stringify(hostTokenPayload),
+    );
+
+    const transferNotice = await roomHeardHostTransfer;
+    check(
+      'room is notified of host transfer',
+      transferNotice.previousHost?.userId === 'u-xfer-host' && transferNotice.newHost?.userId === 'u-xfer-guest',
+      JSON.stringify(transferNotice),
+    );
+
+    const newHostRemoves = await emitAck(xferGuest, 'remove_participant', {
+      userId: 'u-xfer-host',
+    });
+    check('new host can now remove participants', newHostRemoves.ok === true, newHostRemoves.error);
+
+    console.log('\n23. Authentication endpoints (Register, Login, Me)');
+    const testUsername = `user_${Date.now()}`;
+    const testPassword = 'SecretPassword123!';
+
+    const regRes = await fetch(`${BASE_URL}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: testUsername, password: testPassword }),
+    });
+    const regData = await regRes.json();
+    check('register returns 201 and token', regRes.status === 201 && regData.ok === true && typeof regData.token === 'string', JSON.stringify(regData));
+    check('registered user matches requested username', regData.user?.username === testUsername);
+
+    const dupRes = await fetch(`${BASE_URL}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: testUsername, password: testPassword }),
+    });
+    check('duplicate registration returns 409', dupRes.status === 409);
+
+    const loginRes = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: testUsername, password: testPassword }),
+    });
+    const loginData = await loginRes.json();
+    check('login succeeds with correct password', loginRes.status === 200 && loginData.ok === true && typeof loginData.token === 'string');
+
+    const wrongLoginRes = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: testUsername, password: 'WrongPassword!' }),
+    });
+    check('login fails with wrong password', wrongLoginRes.status === 401);
+
+    const meRes = await fetch(`${BASE_URL}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${loginData.token}` },
+    });
+    const meData = await meRes.json();
+    check('me endpoint verifies valid JWT token', meRes.status === 200 && meData.ok === true && meData.user?.username === testUsername);
   } finally {
     for (const socket of sockets) socket.disconnect();
     server.child.kill();

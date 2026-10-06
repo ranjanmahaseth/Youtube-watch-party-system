@@ -5,6 +5,7 @@ import {
   canRemoveParticipants,
   cancelRoomCleanup,
   getRoom,
+  getRoomOrLoad,
   isAssignableRole,
   isValidSeekTime,
   isValidVideoId,
@@ -21,6 +22,7 @@ import {
   toRoomParticipants,
   upsertParticipant,
   addChatMessage,
+  transferHost,
 } from './roomStore.js';
 
 /**
@@ -36,6 +38,7 @@ const DENIED_MESSAGES = {
   change_video: 'Only the host or a moderator can change the video.',
   remove_participant: 'Only the host can remove participants.',
   assign_role: 'Only the host can manage roles.',
+  transfer_host: 'Only the host can transfer room ownership.',
 };
 
 function reply(acknowledge, payload) {
@@ -343,6 +346,64 @@ function handleAssignRole(socket, io, payload, acknowledge) {
 }
 
 /**
+ * Handles the host-only `transfer_host` command.
+ * Host hands the host role to another participant and steps down to moderator.
+ */
+function handleTransferHost(socket, io, payload, acknowledge) {
+  const authorized = authorizePrivileged(
+    socket,
+    'transfer_host',
+    acknowledge,
+    (p) => p?.role === 'host',
+  );
+  if (!authorized) return;
+
+  const { room, participant: currentHost } = authorized;
+
+  const targetUserId = typeof payload?.userId === 'string' ? payload.userId.trim() : '';
+  if (!targetUserId) {
+    return reply(acknowledge, { ok: false, error: 'INVALID_PAYLOAD' });
+  }
+
+  if (targetUserId === currentHost.userId) {
+    return reply(acknowledge, { ok: false, error: 'ALREADY_HOST' });
+  }
+
+  const target = room.participants.get(targetUserId);
+  if (!target) {
+    return reply(acknowledge, { ok: false, error: 'PARTICIPANT_NOT_FOUND' });
+  }
+
+  const result = transferHost(room, targetUserId);
+  if (!result) {
+    return reply(acknowledge, { ok: false, error: 'TRANSFER_FAILED' });
+  }
+
+  reply(acknowledge, { ok: true });
+  console.log(`[room] ${currentHost.username} transferred host to ${target.username} in ${room.id}`);
+
+  // Privately grant new secret host token to target socket
+  const targetSocket = io.sockets.sockets.get(target.socketId);
+  if (targetSocket) {
+    targetSocket.emit('host_token_granted', {
+      roomId: room.id,
+      hostToken: result.newHostToken,
+    });
+  }
+
+  // Broadcast host transfer event to everyone in the room
+  io.to(room.id).emit('host_transferred', {
+    previousHost: result.previousHost,
+    newHost: result.newHost,
+    participants: toRoomParticipants(room),
+    at: Date.now(),
+  });
+
+  // Broadcast updated authoritative room state
+  io.to(room.id).emit('sync_state', toRoomState(room));
+}
+
+/**
  * Handles incoming chat messages from any seated participant.
  * Anyone in the room (host, moderator, or participant) may chat.
  */
@@ -408,7 +469,7 @@ export function registerSocketHandlers(io) {
     socket.data.userId = null;
     console.log(`[socket] connected ${socket.id}`);
 
-    socket.on('join_room', (payload, acknowledge) => {
+    socket.on('join_room', async (payload, acknowledge) => {
       const roomId = normalizeRoomId(payload?.roomId);
       const username = normalizeUsername(payload?.username);
       const userId = typeof payload?.userId === 'string' ? payload.userId.trim() : '';
@@ -419,7 +480,10 @@ export function registerSocketHandlers(io) {
         return reply(acknowledge, { ok: false, error: 'INVALID_PAYLOAD' });
       }
 
-      const room = getRoom(roomId);
+      let room = getRoom(roomId);
+      if (!room) {
+        room = await getRoomOrLoad(roomId);
+      }
       if (!room) {
         return reply(acknowledge, { ok: false, error: 'ROOM_NOT_FOUND' });
       }
@@ -499,6 +563,9 @@ export function registerSocketHandlers(io) {
     );
     socket.on('assign_role', (payload, acknowledge) =>
       handleAssignRole(socket, io, payload, acknowledge),
+    );
+    socket.on('transfer_host', (payload, acknowledge) =>
+      handleTransferHost(socket, io, payload, acknowledge),
     );
     socket.on('send_chat', (payload, acknowledge) =>
       handleSendChat(socket, io, payload, acknowledge),
