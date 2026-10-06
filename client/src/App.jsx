@@ -86,6 +86,9 @@ export default function App() {
   // but a join snapshot must be applied exactly once.
   const [syncTarget, setSyncTarget] = useState(null);
   const [username, setUsername] = useState(getRememberedUsername());
+  const [videoHistory, setVideoHistory] = useState([]);
+  const videoHistoryRef = useRef([]);
+  const roomStateRef = useRef(null);
 
   // The seat we currently hold. A ref lets the socket listeners read the latest
   // value without having to re-register themselves on every change.
@@ -104,12 +107,46 @@ export default function App() {
 
     const handleSyncState = (state) => {
       setRoomState(state);
+      roomStateRef.current = state;
       if (Array.isArray(state?.messages)) {
         setChatMessages((previous) => {
           const ids = new Set(previous.map((m) => m.id));
           const newMessages = state.messages.filter((m) => !ids.has(m.id));
           return newMessages.length > 0 ? [...previous, ...newMessages].slice(-100) : previous;
         });
+      }
+
+      // Track played video history for back navigation across videos
+      const currentVideoId = state?.video?.videoId;
+      if (currentVideoId) {
+        const history = videoHistoryRef.current;
+        const lastVideoId = history[history.length - 1];
+        if (currentVideoId !== lastVideoId) {
+          const nextHistory = [...history, currentVideoId];
+          videoHistoryRef.current = nextHistory;
+          setVideoHistory(nextHistory);
+
+          if (sessionRef.current?.roomId) {
+            const role = state?.participants?.find((p) => p.userId === MY_USER_ID)?.role;
+            const isHostOrMod =
+              role === 'host' || role === 'moderator' || Boolean(sessionRef.current?.hostToken);
+
+            const targetSearch = `?room=${encodeURIComponent(sessionRef.current.roomId)}&v=${encodeURIComponent(currentVideoId)}`;
+            if (window.location.search !== targetSearch) {
+              const stateObj = {
+                inRoom: true,
+                roomId: sessionRef.current.roomId,
+                videoId: currentVideoId,
+              };
+              // First video replaces naked ?room=ID; subsequent videos push onto history for host/mod
+              if (history.length === 0 || !isHostOrMod) {
+                window.history.replaceState(stateObj, '', targetSearch);
+              } else {
+                window.history.pushState(stateObj, '', targetSearch);
+              }
+            }
+          }
+        }
       }
     };
 
@@ -145,10 +182,14 @@ export default function App() {
             setChatMessages(response.state.messages);
           }
           setRoomState(response.state);
+          roomStateRef.current = response.state;
           return;
         }
 
         sessionRef.current = null;
+        roomStateRef.current = null;
+        videoHistoryRef.current = [];
+        setVideoHistory([]);
         setRoomState(null);
         setError(JOIN_ERRORS[response?.error] ?? 'Your room is no longer available.');
       });
@@ -197,6 +238,9 @@ export default function App() {
         // Clear the session FIRST. Otherwise the disconnect below would be
         // followed by an automatic re-join, and the removal would undo itself.
         sessionRef.current = null;
+        roomStateRef.current = null;
+        videoHistoryRef.current = [];
+        setVideoHistory([]);
 
         setRoomState(null);
         setSyncTarget(null);
@@ -236,7 +280,46 @@ export default function App() {
       logActivity(`${payload?.username ?? 'Someone'} is now a ${role}`);
     };
 
-    const handlePopState = () => {
+    const handlePopState = (event) => {
+      const searchParams = new URLSearchParams(window.location.search);
+      const roomInUrl = searchParams.get('room');
+      const videoInUrl = searchParams.get('v') || event?.state?.videoId;
+
+      // 1. If URL has no room parameter, user navigated all the way back to Home!
+      if (!roomInUrl) {
+        handleLeave(true);
+        return;
+      }
+
+      // Check if user has permission to control room video
+      const role = roomStateRef.current?.participants?.find((p) => p.userId === MY_USER_ID)?.role;
+      const isHostOrMod =
+        role === 'host' || role === 'moderator' || Boolean(sessionRef.current?.hostToken);
+
+      // If user cannot control video (regular participant), browser back leaves to Home
+      if (!isHostOrMod) {
+        handleLeave(true);
+        return;
+      }
+
+      // 2. If room is present and a previous video was navigated to (for Host/Moderator):
+      if (videoInUrl && sessionRef.current) {
+        const history = videoHistoryRef.current;
+        const currentVideo = history[history.length - 1];
+
+        if (videoInUrl !== currentVideo) {
+          const targetIndex = history.lastIndexOf(videoInUrl);
+          const updatedHistory =
+            targetIndex !== -1 ? history.slice(0, targetIndex + 1) : [...history, videoInUrl];
+          videoHistoryRef.current = updatedHistory;
+          setVideoHistory(updatedHistory);
+
+          changeVideo(videoInUrl, true);
+          return;
+        }
+      }
+
+      // 3. At initial room entry with no previous videos: back goes directly to Home!
       handleLeave(true);
     };
 
@@ -338,10 +421,27 @@ export default function App() {
         setActivity([]);
         setChatMessages(Array.isArray(state?.messages) ? state.messages : []);
         setRoomState(state);
+        roomStateRef.current = state;
 
-        const targetSearch = `?room=${encodeURIComponent(roomId)}`;
-        if (window.location.search !== targetSearch) {
-          window.history.pushState({ inRoom: true, roomId }, '', targetSearch);
+        const currentVideoId = state.video?.videoId;
+        if (currentVideoId) {
+          videoHistoryRef.current = [currentVideoId];
+          setVideoHistory([currentVideoId]);
+          const targetSearch = `?room=${encodeURIComponent(roomId)}&v=${encodeURIComponent(currentVideoId)}`;
+          if (window.location.search !== targetSearch) {
+            window.history.pushState(
+              { inRoom: true, roomId, videoId: currentVideoId },
+              '',
+              targetSearch,
+            );
+          }
+        } else {
+          videoHistoryRef.current = [];
+          setVideoHistory([]);
+          const targetSearch = `?room=${encodeURIComponent(roomId)}`;
+          if (window.location.search !== targetSearch) {
+            window.history.pushState({ inRoom: true, roomId }, '', targetSearch);
+          }
         }
 
         // When a host creates a new room, start a default starter video and play automatically
@@ -539,8 +639,19 @@ export default function App() {
     );
   }
 
+  function handlePreviousVideo() {
+    if (videoHistoryRef.current.length > 1) {
+      window.history.back();
+    } else {
+      handleLeave();
+    }
+  }
+
   function handleLeave(isFromBrowserBack = false) {
     sessionRef.current = null;
+    roomStateRef.current = null;
+    videoHistoryRef.current = [];
+    setVideoHistory([]);
 
     try {
       if (socket.connected) {
@@ -617,6 +728,9 @@ export default function App() {
         memberError={memberError}
         onAssignRole={assignRole}
         assigningUserId={assigningUserId}
+        canGoBackVideo={videoHistory.length > 1}
+        onPreviousVideo={handlePreviousVideo}
+        videoHistoryCount={videoHistory.length}
       />
     );
   }

@@ -63,6 +63,9 @@ export default function Room({
   memberError,
   onAssignRole,
   assigningUserId,
+  canGoBackVideo = false,
+  onPreviousVideo,
+  videoHistoryCount = 1,
 }) {
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState('chat');
@@ -106,28 +109,58 @@ export default function Room({
     <main className={SHELL}>
       {/* Top back navigation bar */}
       <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={onLeave}
-          className="group inline-flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/90 px-3.5 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-slate-700 hover:bg-slate-800 hover:text-white"
-          title="Go back to Home"
-        >
-          <svg
-            className="h-3.5 w-3.5 transition group-hover:-translate-x-0.5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
+        <div className="flex items-center gap-2">
+          {canControl && canGoBackVideo && (
+            <button
+              type="button"
+              onClick={onPreviousVideo}
+              className="group inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-950/60 px-3.5 py-1.5 text-xs font-semibold text-indigo-200 transition hover:border-indigo-400 hover:bg-indigo-900/80 hover:text-white"
+              title="Go back to previous video (or press browser Back button)"
+            >
+              <svg
+                className="h-3.5 w-3.5 transition group-hover:-translate-x-0.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M11 19l-7-7 7-7m8 14l-7-7 7-7"
+                />
+              </svg>
+              <span>⏮ Previous Video</span>
+              <span className="rounded bg-indigo-500/25 px-1.5 py-0.2 text-[10px] font-mono text-indigo-300">
+                {videoHistoryCount}
+              </span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={onLeave}
+            className="group inline-flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/90 px-3.5 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-slate-700 hover:bg-slate-800 hover:text-white"
+            title="Go back to Home"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M10 19l-7-7m0 0l7-7m-7 7h18"
-            />
-          </svg>
-          <span>Back to Home</span>
-        </button>
+            <svg
+              className="h-3.5 w-3.5 transition group-hover:-translate-x-0.5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10 19l-7-7m0 0l7-7m-7 7h18"
+              />
+            </svg>
+            <span>Back to Home</span>
+          </button>
+        </div>
 
         <span className="text-xs text-slate-500">
           Room: <span className="font-mono font-semibold text-slate-300">{state.roomId}</span>
@@ -147,6 +180,16 @@ export default function Room({
         </div>
 
         <div className="flex flex-wrap gap-2">
+          {canControl && canGoBackVideo && (
+            <button
+              type="button"
+              className={BTN_GHOST}
+              onClick={onPreviousVideo}
+              title="Go back to previous video in history"
+            >
+              ⏮ Previous Video
+            </button>
+          )}
           <button type="button" className={BTN_GHOST} onClick={copyInviteLink}>
             {copied ? 'Link copied' : 'Copy room link'}
           </button>
