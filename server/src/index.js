@@ -6,6 +6,7 @@ import { Server } from 'socket.io';
 import { createRoom, getRoom } from './roomStore.js';
 import { registerSocketHandlers } from './socketHandlers.js';
 import { searchYouTube } from './youtubeSearch.js';
+import { setupRedis, isRedisActive, closeRedis } from './redis.js';
 
 dotenv.config({ quiet: true });
 
@@ -45,11 +46,19 @@ app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'YouTube Watch Party API is running' });
+  res.json({
+    status: 'ok',
+    message: 'YouTube Watch Party API is running',
+    redis: isRedisActive() ? 'connected' : 'disabled (in-memory mode)',
+  });
 });
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', uptime: process.uptime() });
+  res.json({
+    status: 'ok',
+    uptime: process.uptime(),
+    redis: isRedisActive() ? 'connected' : 'disabled (in-memory mode)',
+  });
 });
 
 // Creates a room. The secret host token is returned to the creator only.
@@ -97,8 +106,18 @@ const io = new Server(httpServer, {
 
 registerSocketHandlers(io);
 
+// Initialize Redis adapter if REDIS_URL is provided, with graceful in-memory fallback
+setupRedis(io);
+
 httpServer.listen(PORT, () => {
   // 0.0.0.0 is implicit when no host is given, which is what Render needs.
   console.log(`[server] listening on port ${PORT} (${IS_PRODUCTION ? 'production' : 'development'})`);
   console.log(`[server] allowing CORS from ${ALLOWED_ORIGINS.join(', ')}`);
 });
+
+process.on('SIGTERM', async () => {
+  console.log('[server] SIGTERM received, shutting down gracefully...');
+  await closeRedis();
+  process.exit(0);
+});
+

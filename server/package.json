@@ -11,9 +11,11 @@
     "test:smoke": "node test/smoke.mjs"
   },
   "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.5",
     "express": "^5.2.1",
+    "redis": "^6.3.0",
     "socket.io": "^4.8.4"
   },
   "devDependencies": {
