@@ -70,3 +70,4 @@ export async function closeRedis() {
     console.warn('[redis] Error closing Redis connections:', err.message);
   }
 }
+

@@ -110,9 +110,10 @@ registerSocketHandlers(io);
 setupRedis(io);
 
 httpServer.listen(PORT, () => {
-  // 0.0.0.0 is implicit when no host is given, which is what Render needs.
-  console.log(`[server] listening on port ${PORT} (${IS_PRODUCTION ? 'production' : 'development'})`);
-  console.log(`[server] allowing CORS from ${ALLOWED_ORIGINS.join(', ')}`);
+  console.log(`\n🚀 [server] Backend API running at: http://localhost:${PORT}`);
+  console.log(`🩺 [server] Health check:           http://localhost:${PORT}/api/health`);
+  console.log(`🌐 [server] Allowed CORS origins:    ${ALLOWED_ORIGINS.join(', ')}`);
+  console.log(`💡 [server] Keep this terminal open! Open a 2nd terminal for frontend: cd client && npm run dev\n`);
 });
 
 process.on('SIGTERM', async () => {
