@@ -1,84 +1,14 @@
 import mongoose from 'mongoose';
 import { randomUUID } from 'node:crypto';
+import { User } from './models/User.js';
+import { Room } from './models/Room.js';
 
 let isConnected = false;
 
-// User schema for authentication
-const userSchema = new mongoose.Schema(
-  {
-    username: {
-      type: String,
-      required: true,
-      unique: true,
-      trim: true,
-      minlength: 3,
-      maxlength: 24,
-    },
-    password: {
-      type: String,
-      required: true,
-    },
-    email: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-  },
-  {
-    timestamps: true,
-  },
-);
-
-// Room schema for persistence
-const roomSchema = new mongoose.Schema(
-  {
-    roomId: {
-      type: String,
-      required: true,
-      unique: true,
-      uppercase: true,
-      trim: true,
-    },
-    hostToken: {
-      type: String,
-      required: true,
-    },
-    video: {
-      videoId: { type: String, default: null },
-      loadedBy: { type: String, default: null },
-    },
-    playback: {
-      playState: { type: String, default: 'paused' },
-      currentTime: { type: Number, default: 0 },
-      updatedAt: { type: Number, default: () => Date.now() },
-    },
-    messages: [
-      {
-        id: String,
-        userId: String,
-        username: String,
-        role: String,
-        text: String,
-        timestamp: Number,
-      },
-    ],
-    videoHistory: [{ type: String }],
-    isClosed: {
-      type: Boolean,
-      default: false,
-    },
-    lastActiveAt: {
-      type: Date,
-      default: Date.now,
-    },
-  },
-  {
-    timestamps: true,
-  },
-);
-
-export const UserModel = mongoose.models.User || mongoose.model('User', userSchema);
-export const RoomModel = mongoose.models.Room || mongoose.model('Room', roomSchema);
+// Re-export models for convenient imports across the codebase
+export { User, Room };
+export const UserModel = User;
+export const RoomModel = Room;
 
 // In-memory fallback stores when MongoDB is not connected
 const inMemoryUsers = new Map(); // username -> user
@@ -285,3 +215,4 @@ export async function markRoomClosedInDb(roomId) {
     console.error(`[db] Failed to mark room ${roomId} closed in MongoDB:`, err.message);
   }
 }
+

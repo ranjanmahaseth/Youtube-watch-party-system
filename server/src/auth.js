@@ -199,3 +199,4 @@ authRouter.get('/me', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Could not fetch user profile.' });
   }
 });
+
