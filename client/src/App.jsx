@@ -237,9 +237,7 @@ export default function App() {
     };
 
     const handlePopState = () => {
-      if (sessionRef.current) {
-        handleLeave();
-      }
+      handleLeave(true);
     };
 
     socket.on('sync_state', handleSyncState);
@@ -541,13 +539,20 @@ export default function App() {
     );
   }
 
-  function handleLeave() {
+  function handleLeave(isFromBrowserBack = false) {
     sessionRef.current = null;
 
-    // The server also cleans up on disconnect, so leaving works either way.
-    if (socket.connected) socket.emit('leave_room', () => socket.disconnect());
-    else socket.disconnect();
+    try {
+      if (socket.connected) {
+        socket.emit('leave_room', () => socket.disconnect());
+      } else {
+        socket.disconnect();
+      }
+    } catch {
+      // Ignore disconnect errors
+    }
 
+    // Immediately reset room state so Home component renders directly
     setRoomState(null);
     setActivity([]);
     setChatMessages([]);
@@ -561,8 +566,16 @@ export default function App() {
     setRemoteCommand(null);
     setSyncTarget(null);
 
-    if (window.location.search) {
-      window.history.pushState({}, '', window.location.pathname);
+    // If leaving via in-app button, update URL to '/'
+    if (!isFromBrowserBack) {
+      if (window.location.search) {
+        window.history.pushState({}, '', window.location.pathname);
+      }
+    } else {
+      // If leaving via browser Back button, replace state to make sure URL is clean
+      if (window.location.search) {
+        window.history.replaceState({}, '', window.location.pathname);
+      }
     }
   }
 
