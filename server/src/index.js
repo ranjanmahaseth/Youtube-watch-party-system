@@ -1,4 +1,6 @@
 import dotenv from 'dotenv';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'node:http';
@@ -10,6 +12,9 @@ import { setupRedis, isRedisActive, closeRedis } from './redis.js';
 import { setupDatabase, isDbActive } from './db.js';
 import { authRouter } from './auth.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../.env'), quiet: true });
 dotenv.config({ quiet: true });
 
 const PORT = process.env.PORT || 5000;
@@ -117,15 +122,16 @@ const io = new Server(httpServer, {
 registerSocketHandlers(io);
 
 // Initialize Redis adapter if REDIS_URL is provided, with graceful in-memory fallback
-setupRedis(io);
+await setupRedis(io);
 
 // Initialize MongoDB if MONGODB_URI is provided, with graceful in-memory fallback
-setupDatabase();
+await setupDatabase();
 
 httpServer.listen(PORT, () => {
   console.log(`\n🚀 [server] Backend API running at: http://localhost:${PORT}`);
   console.log(`🩺 [server] Health check:           http://localhost:${PORT}/api/health`);
   console.log(`🌐 [server] Allowed CORS origins:    ${ALLOWED_ORIGINS.join(', ')}`);
+  console.log(`🗄️ [server] Database persistence:   ${isDbActive() ? 'Connected to MongoDB' : 'In-memory mode'}`);
   console.log(`💡 [server] Keep this terminal open! Open a 2nd terminal for frontend: cd client && npm run dev\n`);
 });
 

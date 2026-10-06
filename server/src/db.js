@@ -27,24 +27,31 @@ export async function setupDatabase() {
 
   try {
     console.log('[db] Connecting to MongoDB...');
-    await mongoose.connect(mongoUri, {
+    // If no dbName is in the URI path, default to 'watchparty' so it does not end up in generic 'test'
+    const connectOptions = {
       serverSelectionTimeoutMS: 5000,
-    });
+    };
+    if (process.env.MONGODB_DB_NAME) {
+      connectOptions.dbName = process.env.MONGODB_DB_NAME;
+    }
+
+    await mongoose.connect(mongoUri, connectOptions);
     isConnected = true;
-    console.log('[db] Successfully connected to MongoDB.');
+    const dbName = mongoose.connection.db?.databaseName || 'watchparty';
+    console.log(`[db] ✅ Successfully connected to MongoDB Atlas! (Database: "${dbName}")`);
 
     mongoose.connection.on('disconnected', () => {
       isConnected = false;
-      console.warn('[db] MongoDB disconnected. Falling back to in-memory mode.');
+      console.warn('[db] ⚠️ MongoDB disconnected. Falling back to in-memory mode.');
     });
 
     mongoose.connection.on('reconnected', () => {
       isConnected = true;
-      console.log('[db] MongoDB reconnected.');
+      console.log('[db] 🔄 MongoDB reconnected.');
     });
   } catch (err) {
     isConnected = false;
-    console.error(`[db] MongoDB connection failed: ${err.message}. Running in in-memory mode.`);
+    console.error(`[db] ❌ MongoDB connection failed: ${err.message}. Running in in-memory mode.`);
   }
 }
 
@@ -117,6 +124,7 @@ export async function createUser({ username, password, email = '' }) {
         password,
         email: String(email).trim(),
       });
+      console.log(`[db] ✅ User "${newUser.username}" saved to MongoDB (${mongoose.connection.db?.databaseName}.users).`);
       return {
         id: newUser._id.toString(),
         username: newUser.username,
@@ -132,6 +140,7 @@ export async function createUser({ username, password, email = '' }) {
   }
 
   // In-memory fallback
+  console.warn(`[db] ⚠️ Saving user "${username}" in memory fallback (MongoDB not connected).`);
   if (inMemoryUsers.has(normalizedKey)) {
     throw new Error('USERNAME_TAKEN');
   }
@@ -155,7 +164,12 @@ export async function createUser({ username, password, email = '' }) {
 // ----------------- ROOM PERSISTENCE HELPERS -----------------
 
 export async function saveRoomToDb(room) {
-  if (!isDbActive() || !room?.id) return;
+  if (!isDbActive() || !room?.id) {
+    if (!isDbActive() && room?.id) {
+      console.warn(`[db] ⚠️ Room "${room.id}" kept in memory only (MongoDB is not active).`);
+    }
+    return;
+  }
 
   try {
     await RoomModel.findOneAndUpdate(
@@ -176,10 +190,11 @@ export async function saveRoomToDb(room) {
         lastActiveAt: new Date(),
         isClosed: false,
       },
-      { upsert: true, new: true },
+      { upsert: true, returnDocument: 'after' },
     );
+    console.log(`[db] ✅ Room "${room.id}" saved/synced to MongoDB (${mongoose.connection.db?.databaseName}.rooms).`);
   } catch (err) {
-    console.error(`[db] Failed to save room ${room.id} to MongoDB:`, err.message);
+    console.error(`[db] ❌ Failed to save room ${room.id} to MongoDB:`, err.message);
   }
 }
 
